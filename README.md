@@ -3,7 +3,7 @@
 A minimal end-to-end demonstration of llama.cpp tool calling. It assumes a running llama.cpp server and uses the official `openai` client, e.g.:
 
 ```bash
-llama-server --model Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf --jinja -fa on -ngl 999
+llama-server -hf unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M --jinja
 ```
 
 ## Run from IPython
