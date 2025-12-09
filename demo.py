@@ -75,14 +75,34 @@ TOOLS: List[Dict[str, Any]] = [
 # -------------------------------
 # Actual Python implementations
 # -------------------------------
-
 def top_processes(limit: int = 5) -> str:
-    """Return the top processes using the ps command."""
+    """Return the top processes using the ps command, excluding the ps process itself."""
     logger.info("Running top_processes with limit=%s", limit)
     cmd = ["ps", "axo", "pid,ppid,pcpu,pmem,comm", "--sort=-pcpu"]
     completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
     lines = completed.stdout.strip().splitlines()
-    return "\n".join(lines[: limit + 1])  # header + N rows
+
+    if not lines:
+        return "No processes found."
+
+    header = lines[0]
+    rows = lines[1:]
+
+    filtered_rows = []
+    for line in rows:
+        # Split into at most 5 fields: PID, PPID, %CPU, %MEM, COMM
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        comm = parts[4]
+        if comm == "ps":
+            continue
+        filtered_rows.append(line)
+        if len(filtered_rows) >= limit:
+            break
+
+    return "\n".join([header] + filtered_rows)
+
 
 
 def disk_usage(path: str = "/") -> str:
