@@ -96,8 +96,15 @@ def _call_llama(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     return response.model_dump()
 
 
-def run_demo(user_message: str = "What is currently using the most CPU?") -> Dict[str, Any]:
-    """Run a two-turn tool calling conversation and return the final response.
+def run_demo(
+    user_message: str = "What is currently using the most CPU?",
+    max_iterations: int = 5,
+) -> Dict[str, Any]:
+    """Run a multi-turn tool calling conversation until the model finishes.
+
+    The loop will continue issuing tool calls and feeding results back into the
+    model until an assistant message arrives with no tool_calls (or the
+    ``max_iterations`` safeguard is hit).
 
     This is intentionally small so it can be copied into an IPython session:
 
@@ -120,44 +127,51 @@ def run_demo(user_message: str = "What is currently using the most CPU?") -> Dic
         {"role": "user", "content": user_message},
     ]
 
-    first_response = _call_llama(messages)
-    choice = first_response["choices"][0]["message"]
-    tool_calls = choice.get("tool_calls", [])
+    last_response: Dict[str, Any] | None = None
 
-    if tool_calls:
+    for iteration in range(1, max_iterations + 1):
+        logger.info("Requesting model response (iteration %s)", iteration)
+        last_response = _call_llama(messages)
+        choice = last_response["choices"][0]["message"]
         messages.append(choice)
 
-    for tool_call in tool_calls:
-        function = tool_call.get("function", {})
-        name = function.get("name")
-        args = function.get("arguments") or "{}"
-        parsed_args = json.loads(args)
+        tool_calls = choice.get("tool_calls") or []
+        if not tool_calls:
+            logger.info("Model provided final answer without tool calls on iteration %s", iteration)
+            logger.info(choice.get("content"))
+            return last_response
 
-        if name == "top_processes":
-            limit = int(parsed_args.get("limit", 5))
-            logger.info("Model requested top_processes with limit=%s", limit)
-            tool_output = top_processes(limit=limit)
-        elif name == "disk_usage":
-            path = parsed_args.get("path", "/")
-            logger.info("Model requested disk_usage for path=%s", path)
-            tool_output = disk_usage(path=path)
-        else:
-            logger.warning("Unknown tool requested: %s", name)
-            continue
+        for tool_call in tool_calls:
+            function = tool_call.get("function", {})
+            name = function.get("name")
+            args = function.get("arguments") or "{}"
+            parsed_args = json.loads(args)
 
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "name": name,
-                "content": tool_output,
-            }
-        )
+            if name == "top_processes":
+                limit = int(parsed_args.get("limit", 5))
+                logger.info("Model requested top_processes with limit=%s", limit)
+                tool_output = top_processes(limit=limit)
+            elif name == "disk_usage":
+                path = parsed_args.get("path", "/")
+                logger.info("Model requested disk_usage for path=%s", path)
+                tool_output = disk_usage(path=path)
+            else:
+                logger.warning("Unknown tool requested: %s", name)
+                continue
 
-    if not tool_calls:
-        logger.info("Model responded without requesting any tools.")
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "name": name,
+                    "content": tool_output,
+                }
+            )
 
-    logger.info("Requesting final answer after tool execution")
-    final_response = _call_llama(messages)
-    logger.info(final_response["choices"][0]["message"]["content"])
-    return final_response
+        logger.info("Completed tool calls for iteration %s; continuing conversation", iteration)
+
+    logger.warning(
+        "Reached max_iterations=%s without a final model message lacking tool calls.",
+        max_iterations,
+    )
+    return last_response or {}
