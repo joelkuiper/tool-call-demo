@@ -6,7 +6,6 @@ import logging
 import os
 import subprocess
 from typing import Any, Dict, List
-from textwrap import dedent
 
 from openai import OpenAI
 
@@ -15,32 +14,13 @@ LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://127.0.0.1:8080")
 DEFAULT_MODEL = os.environ.get("LLAMA_MODEL", "Qwen2.5-VL-7B-Instruct-Q4_K_M")
 LOG_LEVEL = os.environ.get("DEMO_LOG_LEVEL", "INFO").upper()
 
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="[%(levelname)s] %(message)s",
-)
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 client = OpenAI(
     base_url=f"{LLAMA_SERVER_URL}/v1",
     api_key=os.environ.get("LLAMA_API_KEY", "not-needed"),
 )
-
-SYSTEM_PROMPT = dedent("""
-    You are a helpful assistant that can optionally inspect the local system using tools.
-
-    You have access to:
-    - top_processes: to inspect CPU-hungry processes.
-    - disk_usage: to inspect disk usage for a given path.
-
-    Only call these tools when the user explicitly asks about CPU usage, running processes,
-    disk operations, disk space, filesystem usage, or similar system-level diagnostics.
-
-    If you have already called a tool for the current question, do not call the same tool again
-    unless the user provides a new argument or explicitly asks for a repeat.
-
-    After receiving tool output, integrate it into a final natural-language answer.
-""")
 
 
 TOOLS: List[Dict[str, Any]] = [
@@ -137,7 +117,13 @@ def run_demo(
     logger.info("Starting demo with user message: %s", user_message)
 
     messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": (
+                "Use the available tools to inspect the system before answering."
+                " Call top_processes to inspect CPU and disk_usage to inspect storage."
+            ),
+        },
         {"role": "user", "content": user_message},
     ]
 
@@ -147,29 +133,14 @@ def run_demo(
         logger.info("Requesting model response (iteration %s)", iteration)
         last_response = _call_llama(messages)
         choice = last_response["choices"][0]["message"]
-
-        # Normalize tool_calls: if missing or None, treat as []
-        raw_tool_calls = choice.get("tool_calls") or []
-        if not isinstance(raw_tool_calls, list):
-            logger.warning(
-                "Unexpected tool_calls type %r; treating as no tool calls",
-                type(raw_tool_calls),
-            )
-            raw_tool_calls = []
-
-        tool_calls = raw_tool_calls
         messages.append(choice)
 
-        # If there are no tool calls, this is our final answer
+        tool_calls = choice.get("tool_calls") or []
         if not tool_calls:
-            logger.info(
-                "Model provided final answer without tool calls on iteration %s",
-                iteration,
-            )
+            logger.info("Model provided final answer without tool calls on iteration %s", iteration)
             logger.info(choice.get("content"))
             return last_response
 
-        # Execute requested tools
         for tool_call in tool_calls:
             function = tool_call.get("function", {})
             name = function.get("name")
@@ -197,23 +168,7 @@ def run_demo(
                 }
             )
 
-        logger.info(
-            "Completed tool calls for iteration %s; continuing conversation", iteration
-        )
-
-        # Simple guardrail: na de eerste tool-ronde expliciet zeggen dat het nu klaar is met tools
-        if iteration == 1:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "You have now received the requested tool outputs. "
-                        "Use them to answer the user's question directly. "
-                        "Do not call any further tools unless the user explicitly asks "
-                        "for another system inspection."
-                    ),
-                }
-            )
+        logger.info("Completed tool calls for iteration %s; continuing conversation", iteration)
 
     logger.warning(
         "Reached max_iterations=%s without a final model message lacking tool calls.",
