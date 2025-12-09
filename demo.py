@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 from openai import OpenAI
 from textwrap import dedent
+import psutil
 
 
 LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://127.0.0.1:8080")
@@ -46,6 +47,18 @@ TOOLS: List[Dict[str, Any]] = [
                         "maximum": 20,
                     }
                 },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_usage",
+            "description": "Report memory usage using psutil.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
                 "required": [],
             },
         },
@@ -118,10 +131,31 @@ def disk_usage(path: str = "/") -> str:
         logger.error("Unexpected error in disk_usage: %s", e)
         return f"Error: {e}"
 
+def memory_usage() -> str:
+    """Return human-readable memory usage using psutil."""
+    logger.info("Running memory_usage")
+    try:
+        # Get memory info
+        memory_info = psutil.virtual_memory()
+        total = memory_info.total / (1024 ** 3)  # Convert bytes to GB
+        available = memory_info.available / (1024 ** 3)  # Convert bytes to GB
+        used = memory_info.used / (1024 ** 3)  # Convert bytes to GB
+        percent = memory_info.percent
+        return (
+            f"Total memory: {total:.2f} GB\n"
+            f"Used memory: {used:.2f} GB\n"
+            f"Available memory: {available:.2f} GB\n"
+            f"Memory usage: {percent}%"
+        )
+    except Exception as e:
+        logger.error("Unexpected error in memory_usage: %s", e)
+        return f"Error: {e}"
+
 # Mapping from tool name to implementation
 TOOL_IMPLS: Dict[str, Any] = {
     "top_processes": top_processes,
     "disk_usage": disk_usage,
+    "memory_usage": memory_usage
 }
 
 # -------------------------------
