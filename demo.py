@@ -14,10 +14,10 @@ from textwrap import dedent
 
 LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://127.0.0.1:8080")
 DEFAULT_MODEL = os.environ.get("LLAMA_MODEL", "Qwen2.5-VL-7B-Instruct-Q4_K_M")
-LOG_LEVEL = os.environ.get("DEMO_LOG_LEVEL", "DEBUG").upper()
+LOG_LEVEL = os.environ.get("DEMO_LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.DEBUG),
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="[%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ TOOLS: List[Dict[str, Any]] = [
 # -------------------------------
 def top_processes(limit: int = 5) -> str:
     """Return the top processes using the ps command, excluding the ps process itself."""
-    logger.debug("Running top_processes with limit=%s", limit)
+    logger.info("Running top_processes with limit=%s", limit)
     cmd = ["ps", "axo", "pid,ppid,pcpu,pmem,comm", "--sort=-pcpu"]
     completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
     lines = completed.stdout.strip().splitlines()
@@ -107,7 +107,7 @@ def top_processes(limit: int = 5) -> str:
 
 def disk_usage(path: str = "/") -> str:
     """Return human-readable disk usage for the given path."""
-    logger.debug("Running disk_usage for path=%s", path)
+    logger.info("Running disk_usage for path=%s", path)
     cmd = ["df", "-h", path]
     completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
     return completed.stdout.strip()
@@ -148,7 +148,7 @@ def call_tool_with_filtered_kwargs(name: str, args: Dict[str, Any]) -> str:
         if param_name in args:
             filtered[param_name] = args[param_name]
 
-    logger.debug("Calling tool %s with filtered args=%s (raw=%s)", name, filtered, args)
+    logger.info("Calling tool %s with filtered args=%s (raw=%s)", name, filtered, args)
     return impl(**filtered)
 
 
@@ -157,7 +157,7 @@ def call_tool_with_filtered_kwargs(name: str, args: Dict[str, Any]) -> str:
 # -------------------------------
 
 def _call_llama(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    logger.debug("Sending %s message(s) to llama.cpp", len(messages))
+    logger.info("Sending %s message(s) to llama.cpp", len(messages))
     response = client.chat.completions.create(
         model=DEFAULT_MODEL,
         messages=messages,
@@ -165,7 +165,7 @@ def _call_llama(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         tool_choice="auto",  # let the model decide whether to call tools
         temperature=0,
     )
-    logger.debug("Received response with %s choice(s)", len(response.choices))
+    logger.info("Received response with %s choice(s)", len(response.choices))
     return response.model_dump()
 
 
@@ -198,7 +198,7 @@ def run_demo(
 ) -> Dict[str, Any]:
     """Run a multi-turn tool calling conversation until the model finishes."""
 
-    logger.debug("Starting demo with user message: %s", user_message)
+    logger.info("Starting demo with user message: %s", user_message)
 
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -208,14 +208,14 @@ def run_demo(
     last_response: Dict[str, Any] | None = None
 
     for iteration in range(1, max_iterations + 1):
-        logger.debug("Requesting model response (iteration %s)", iteration)
+        logger.info("Requesting model response (iteration %s)", iteration)
 
         last_response = _call_llama(messages)
         choice_obj = last_response["choices"][0]
         choice = choice_obj["message"]
         finish_reason = choice_obj.get("finish_reason")
 
-        logger.debug("finish_reason=%s", finish_reason)
+        logger.info("finish_reason=%s", finish_reason)
         messages.append(choice)
 
         # Normalize tool_calls
@@ -226,8 +226,8 @@ def run_demo(
 
         # No tool calls → final answer
         if not tool_calls:
-            logger.debug("Model provided final answer without tools.")
-            logger.debug(choice.get("content"))
+            logger.info("Model provided final answer without tools.")
+            logger.info(choice.get("content"))
             return last_response
 
         # Execute tools
@@ -261,7 +261,7 @@ def run_demo(
                 }
             )
 
-        logger.debug("Completed tool calls; continuing conversation.")
+        logger.info("Completed tool calls; continuing conversation.")
 
     logger.warning("Reached max_iterations=%s without final answer.", max_iterations)
     return last_response or {}
