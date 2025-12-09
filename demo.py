@@ -96,6 +96,29 @@ def _call_llama(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     return response.model_dump()
 
 
+from textwrap import dedent
+
+SYSTEM_PROMPT = dedent("""
+    You are a helpful assistant that can optionally inspect the local system using tools.
+
+    You have access to:
+    - top_processes: to inspect CPU-hungry processes.
+    - disk_usage: to inspect disk usage for a given path.
+
+    Only call these tools when the user explicitly asks about CPU usage, running processes,
+    disk operations, disk space, filesystem usage, or similar system-level diagnostics.
+
+    For questions about weather, geography, general knowledge, science, or anything unrelated
+    to the local machine's state, DO NOT call tools; answer directly.
+
+    If you have already called a tool for the current question, do not call the same tool again
+    unless the user provides a new argument or explicitly asks for a repeat.
+
+    After receiving tool output, integrate it into a final natural-language answer.
+    Do not call further tools unless explicitly asked.
+""")
+
+
 def run_demo(
     user_message: str = "What is currently using the most CPU?",
     max_iterations: int = 5,
@@ -119,10 +142,7 @@ def run_demo(
     messages: List[Dict[str, Any]] = [
         {
             "role": "system",
-            "content": (
-                "Use the available tools to inspect the system before answering."
-                " Call top_processes to inspect CPU and disk_usage to inspect storage."
-            ),
+            "content": SYSTEM_PROMPT,
         },
         {"role": "user", "content": user_message},
     ]
