@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import inspect
 from typing import Any, Dict, List
 
 from openai import OpenAI
@@ -28,7 +29,7 @@ client = OpenAI(
 
 
 # -------------------------------
-# Tools definition for the model
+# Tool schema for the model
 # -------------------------------
 
 TOOLS: List[Dict[str, Any]] = [
@@ -76,25 +77,59 @@ TOOLS: List[Dict[str, Any]] = [
 # -------------------------------
 
 def top_processes(limit: int = 5) -> str:
+    """Return the top processes using the ps command."""
     logger.info("Running top_processes with limit=%s", limit)
     cmd = ["ps", "axo", "pid,ppid,pcpu,pmem,comm", "--sort=-pcpu"]
     completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
     lines = completed.stdout.strip().splitlines()
-    return "\n".join(lines[: limit + 1])  # include header
+    return "\n".join(lines[: limit + 1])  # header + N rows
 
 
 def disk_usage(path: str = "/") -> str:
+    """Return human-readable disk usage for the given path."""
     logger.info("Running disk_usage for path=%s", path)
     cmd = ["df", "-h", path]
     completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
     return completed.stdout.strip()
 
 
-# Dispatch table for dynamic tool execution
-TOOL_IMPLS = {
+# Mapping from tool name to implementation
+TOOL_IMPLS: Dict[str, Any] = {
     "top_processes": top_processes,
     "disk_usage": disk_usage,
 }
+
+
+# -------------------------------
+# Generic **kwargs adapter
+# -------------------------------
+
+def call_tool_with_filtered_kwargs(name: str, args: Dict[str, Any]) -> str:
+    """Call a tool implementation, keeping only args that match its signature."""
+    impl = TOOL_IMPLS.get(name)
+    if impl is None:
+        raise ValueError(f"Unknown tool: {name}")
+
+    if not isinstance(args, dict):
+        logger.warning("Tool args for %s were not a dict: %r; treating as empty.", name, args)
+        args = {}
+
+    sig = inspect.signature(impl)
+    filtered: Dict[str, Any] = {}
+
+    for param_name, param in sig.parameters.items():
+        # We only support standard keyword params here
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        if param_name in args:
+            filtered[param_name] = args[param_name]
+
+    logger.info("Calling tool %s with filtered args=%s (raw=%s)", name, filtered, args)
+    return impl(**filtered)
 
 
 # -------------------------------
@@ -107,6 +142,7 @@ def _call_llama(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         model=DEFAULT_MODEL,
         messages=messages,
         tools=TOOLS,
+        tool_choice="auto",  # let the model decide whether to call tools
         temperature=0,
     )
     logger.info("Received response with %s choice(s)", len(response.choices))
@@ -133,13 +169,14 @@ SYSTEM_PROMPT = dedent("""
 
 
 # -------------------------------
-# Demo Runner
+# Demo runner
 # -------------------------------
 
 def run_demo(
     user_message: str = "What is currently using the most CPU?",
     max_iterations: int = 5,
 ) -> Dict[str, Any]:
+    """Run a multi-turn tool calling conversation until the model finishes."""
 
     logger.info("Starting demo with user message: %s", user_message)
 
@@ -159,46 +196,41 @@ def run_demo(
         finish_reason = choice_obj.get("finish_reason")
 
         logger.info("finish_reason=%s", finish_reason)
-
         messages.append(choice)
 
-        # Ensure tool_calls is always a list
+        # Normalize tool_calls
         tool_calls = choice.get("tool_calls") or []
         if not isinstance(tool_calls, list):
             logger.warning("tool_calls had unexpected type %r — ignoring", type(tool_calls))
             tool_calls = []
 
-        # If no tool calls: final answer
+        # No tool calls → final answer
         if not tool_calls:
             logger.info("Model provided final answer without tools.")
             logger.info(choice.get("content"))
             return last_response
 
-        # Execute each requested tool
+        # Execute tools
         for tool_call in tool_calls:
-            func = tool_call.get("function", {})
-            name = func.get("name")
-            raw_args = func.get("arguments") or "{}"
+            func_desc = tool_call.get("function", {})
+            name = func_desc.get("name")
+            raw_args = func_desc.get("arguments") or "{}"
 
-            # Parse arguments
             try:
                 args = json.loads(raw_args)
             except json.JSONDecodeError:
                 logger.warning("Bad JSON tool arguments %r — using empty dict", raw_args)
                 args = {}
 
-            impl = TOOL_IMPLS.get(name)
-            if not impl:
-                logger.warning("Unknown tool requested: %s", name)
+            if not name:
+                logger.warning("Tool call without name: %r", tool_call)
                 continue
 
-            # Run tool with flexible **args
-            logger.info("Executing tool '%s' with args=%s", name, args)
             try:
-                tool_output = impl(**args)
-            except TypeError:
-                # If model passes unexpected arguments, discard them
-                tool_output = impl()
+                tool_output = call_tool_with_filtered_kwargs(name, args)
+            except Exception as e:
+                logger.warning("Error while running tool %s: %s", name, e)
+                continue
 
             messages.append(
                 {
@@ -211,7 +243,5 @@ def run_demo(
 
         logger.info("Completed tool calls; continuing conversation.")
 
-    logger.warning(
-        "Reached max_iterations=%s without final answer.", max_iterations
-    )
+    logger.warning("Reached max_iterations=%s without final answer.", max_iterations)
     return last_response or {}
