@@ -206,6 +206,7 @@ SYSTEM_PROMPT = dedent("""
     You have access to:
     - top_processes: inspect CPU-hungry processes.
     - disk_usage: inspect disk usage.
+    - memory_usage: inspect the memory usage.
     Only call these tools when the user explicitly asks about CPU, processes,
     disk usage, filesystem space, or similar diagnostics.
     After receiving tool outputs, integrate them into a final natural-language answer.
