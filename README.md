@@ -12,9 +12,10 @@ There are two demonstrations avaiable.
 ### System stats 
 This demo uses `psutil`, `ps` and `df` to inspect system stats.
 
-It defines two tools:
+It defines three tools:
   * `top_processes` shells out to `ps` to list the busiest processes.
   * `disk_usage` uses `df -h` to summarize storage for a path.
+  * `memory_usage` uses `psutil` to inspect used and available memory.
 
 Then: 
   * Sends a chat completion request with that tool registered.
