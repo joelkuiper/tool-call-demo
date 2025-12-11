@@ -15,6 +15,7 @@ This demo uses `psutil`, `ps` and `df` to inspect system stats.
 It defines two tools:
   * `top_processes` shells out to `ps` to list the busiest processes.
   * `disk_usage` uses `df -h` to summarize storage for a path.
+
 Then: 
   * Sends a chat completion request with that tool registered.
   * Executes the model's tool call and returns the model's final message with the tool output attached.
